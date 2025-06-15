@@ -1,7 +1,7 @@
 ﻿using EpicKit.WebAPI.Store.Models;
 using Microsoft.Extensions.Logging;
 
-namespace EpicContentContentDownloader;
+namespace EpicGamesContentDownloader;
 
 internal class EpicGamesSession
 {

@@ -3,7 +3,7 @@ using Newtonsoft.Json;
 using System.IO.Compression;
 using System.IO.IsolatedStorage;
 
-namespace EpicContentContentDownloader;
+namespace EpicGamesContentDownloader;
 
 public class AccountSettingsStore
 {

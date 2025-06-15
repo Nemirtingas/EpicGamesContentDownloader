@@ -2,13 +2,30 @@
 using Microsoft.Extensions.Logging;
 using System.Security.Cryptography;
 
-namespace EpicContentContentDownloader;
+namespace EpicGamesContentDownloader;
 
 public class DownloadPlan
 {
+    public class DownloadPlanFileCounter
+    {
+        public string FileName;
+        public ulong DownloadedSize;
+        public ulong Size;
+    }
+
+    public class DownloadPlanGlobalCounter
+    {
+        public ulong FileDownloaded;
+        public ulong FileCount;
+
+        public ulong DownloadedSize;
+        public ulong Size;
+    }
+
     private class PlanWebClient
     {
         public HttpClient HttpClient { get; set; } = new HttpClient();
+        public CancellationToken CancellationToken { get; set; }
         public bool InUse { get; set; } = false;
     }
 
@@ -20,6 +37,7 @@ public class DownloadPlan
 
     private class FileWebChunk
     {
+        public AsyncMutex Mutex = new();
         public DataChunk DataChunk { get; set; } = null;
         public string ChunkFilePath { get; set; }
         public string WebPath { get; set; } = string.Empty;
@@ -48,16 +66,17 @@ public class DownloadPlan
         public ulong FileSize = 0;
         public byte[] Sha1 = new byte[20];
 
-        public List<FileDownloadChunk> FileChunks = new List<FileDownloadChunk>();
+        public List<FileDownloadChunk> FileChunks = new();
     }
 
-    private uint ParallelCount { get; set; }
+    private int ParallelCount { get; set; }
     private string OutputDirectory { get; set; }
-    private List<PlanWebClient> _WebClients = new List<PlanWebClient>();
-    private List<WebHost> _WebHosts { get; set; } = new List<WebHost>();
+    private List<PlanWebClient> _WebClients = new();
+    private List<WebHost> _WebHosts { get; set; } = new();
 
-    private List<FileDownloadPlan> FilesDownloadPlan = new List<FileDownloadPlan>();
-    private ulong TotalDownloadSize = 0;
+    private List<FileDownloadPlan> FilesDownloadPlan = new();
+
+    private DownloadPlanGlobalCounter DownloadPlanCounter = new();
 
     private async Task<FileDownloadChunk> DownloadChunk(List<PlanWebClient> WebClients, FileDownloadChunk downloadChunk)
     {
@@ -69,7 +88,7 @@ public class DownloadPlan
 
         Utils.Logger.LogTrace($"Started chunk: {webChunk.ChunkFilePath}");
 
-        lock (webChunk)
+        using (var lk = await webChunk.Mutex.LockAsync())
         {
             if (webChunk.Started)
             {
@@ -140,30 +159,28 @@ public class DownloadPlan
             }
         }
 
-        WebHost web_host = null;
+        WebHost webHost = null;
 
         for (int i = 0; i < 10; ++i)
         {
-            CancellationTokenSource ct = new CancellationTokenSource();
-            PlanWebClient webClient = null;
+            var webClient = default(PlanWebClient);
             try
             {
                 Utils.Logger.LogTrace($"Waiting for webclient chunk: {webChunk.ChunkFilePath}");
                 while (webClient == null)
                 {
-                    webClient = WebClients.FirstOrDefault(wc =>
+                    foreach (var webCli in WebClients)
                     {
-                        lock (wc)
+                        using (var lk = await webChunk.Mutex.LockAsync())
                         {
-                            if (!wc.InUse)
+                            if (!webCli.InUse)
                             {
-                                wc.InUse = true;
-                                return true;
+                                webCli.InUse = true;
+                                webClient = webCli;
+                                break;
                             }
                         }
-
-                        return false;
-                    });
+                    }
 
                     if (webClient == null)
                         await Task.Delay(TimeSpan.FromMilliseconds(150));
@@ -172,17 +189,17 @@ public class DownloadPlan
                 // Find the host with fewer fails
                 foreach (var item in _WebHosts)
                 {
-                    if (web_host == null || item.FailCount < web_host.FailCount)
+                    if (webHost == null || item.FailCount < webHost.FailCount)
                     {
-                        web_host = item;
+                        webHost = item;
                     }
                 }
 
                 Utils.Logger.LogTrace($"Downloading chunk: {webChunk.ChunkFilePath}");
 
-                var request = new HttpRequestMessage(HttpMethod.Get, $"{web_host.Url}/{webChunk.WebPath}");
+                var request = new HttpRequestMessage(HttpMethod.Get, $"{webHost.Url}/{webChunk.WebPath}");
                 // Some content host are very buggy and doesn't respond to the web request, so put a timeout here.
-                var resp = await webClient.HttpClient.SendAsync(request, HttpCompletionOption.ResponseContentRead, ct.Token).WaitAsync(TimeSpan.FromSeconds(15));
+                var resp = await webClient.HttpClient.SendAsync(request, HttpCompletionOption.ResponseContentRead, webClient.CancellationToken).WaitAsync(TimeSpan.FromSeconds(15));
 
                 var chunkStream = await resp.Content.ReadAsStreamAsync();
 
@@ -209,47 +226,50 @@ public class DownloadPlan
             }
             catch (TimeoutException)
             {
-                ++web_host.FailCount;
-                lock (webChunk)
+                ++webHost.FailCount;
+                using (var lk = await webChunk.Mutex.LockAsync())
                 {
                     webChunk.Started = false;
-                    Monitor.PulseAll(webChunk);
                 }
-                ct.Cancel();
             }
             catch (Exception)
             {
-                ++web_host.FailCount;
+                ++webHost.FailCount;
             }
             finally
             {
-                lock (webClient)
+                using (var lk = await webChunk.Mutex.LockAsync())
                 {
                     webClient.InUse = false;
                 }
             }
         }
 
-        lock (webChunk)
+        using (var lk = await webChunk.Mutex.LockAsync())
         {
             if (webChunk.DataChunk == null)
                 webChunk.Started = false;
-
-            Monitor.PulseAll(webChunk);
         }
 
         Utils.Logger.LogTrace($"Finished chunk: {webChunk.ChunkFilePath}");
         return downloadChunk;
     }
 
-    public static async Task<DownloadPlan> BuildDownloadPlanAsync(DownloadConfig downloadConfig, Manifest manifest)
+    public static async Task<DownloadPlan> BuildDownloadPlanAsync(DownloadConfiguration downloadConfig, Manifest manifest)
     {
         var plan = new DownloadPlan();
         var commonWebChunks = new Dictionary<EpicKit.Manifest.Guid, FileWebChunk>();
 
         plan.ParallelCount = downloadConfig.ParallelClientCount;
         plan.OutputDirectory = downloadConfig.OutputDirectory;
-        plan._WebHosts.AddRange(manifest.CustomFieldsList.CustomFields["BaseUrl"].Split(",").Select(e => new WebHost
+
+        // Older manifests has a BaseUrl CustomFields, so try to read it.
+        var manifestBaseUrls = new List<string>();
+
+        if (manifest.CustomFieldsList.CustomFields.TryGetValue("BaseUrl", out var v))
+            manifestBaseUrls.AddRange(v.Split(","));
+
+        plan._WebHosts.AddRange(manifestBaseUrls.Concat(downloadConfig.BaseUrls).ToHashSet().Select(e => new WebHost
         {
             Url = e,
             FailCount = 0
@@ -262,7 +282,8 @@ public class DownloadPlan
             plan._WebClients.Add(cli);
         }
 
-        int max_file_count = manifest.FileManifestList.FileManifests.Count;
+        int maxFileCount = manifest.FileManifestList.FileManifests.Count;
+        plan.DownloadPlanCounter.FileCount = (ulong)maxFileCount;
 
         foreach (var fileManifest in manifest.FileManifestList.FileManifests)
         {
@@ -272,7 +293,7 @@ public class DownloadPlan
             fileManifest.Sha1Hash.CopyTo(fileDownloadPlan.Sha1, 0);
             fileDownloadPlan.FileChunks = new List<FileDownloadChunk>(fileManifest.FileChunks.Count);
 
-            plan.TotalDownloadSize += fileManifest.FileSize;
+            plan.DownloadPlanCounter.Size += fileManifest.FileSize;
 
             await Task.Run(() =>
             {
@@ -338,7 +359,7 @@ public class DownloadPlan
         }
     }
 
-    private async Task<bool> CheckFileIntegrity(string filePath, List<FileDownloadChunk> fileChunks, byte[] shaHash)
+    private async Task<bool> CheckFileIntegrityAsync(string filePath, List<FileDownloadChunk> fileChunks, byte[] shaHash)
     {
         try
         {
@@ -368,32 +389,49 @@ public class DownloadPlan
         return false;
     }
 
-    public async Task RunDownloadPlan()
+    public Task RunDownloadPlanAsync(CancellationTokenSource cts)
+        => RunDownloadPlanAsync(cts, null);
+
+    public async Task RunDownloadPlanAsync(CancellationTokenSource cts, Action<DownloadPlanGlobalCounter, DownloadPlanFileCounter> downloadReportCallback)
     {
-        ulong totalDownloadedSize = 0;
+        foreach (var webClient in _WebClients)
+            webClient.CancellationToken = cts.Token;
 
         foreach (var filePlan in FilesDownloadPlan)
         {
             var chunksToDelete = new List<string>();
             var outputFileName = Path.Combine(OutputDirectory, filePlan.Filename);
             Directory.CreateDirectory(Path.GetDirectoryName(outputFileName));
-            ulong downloadedSize = 0;
             var chunkCount = filePlan.FileChunks.Count;
             var downloadedChunkCount = 0;
 
-            if (await CheckFileIntegrity(outputFileName, filePlan.FileChunks, filePlan.Sha1))
+            var fileCounter = new DownloadPlanFileCounter
             {
-                totalDownloadedSize += filePlan.FileSize;
+                FileName = filePlan.Filename,
+                Size = filePlan.FileSize
+            };
+
+            cts.Token.ThrowIfCancellationRequested();
+
+            if (await CheckFileIntegrityAsync(outputFileName, filePlan.FileChunks, filePlan.Sha1))
+            {
+                ++DownloadPlanCounter.FileDownloaded;
+                DownloadPlanCounter.DownloadedSize += filePlan.FileSize;
+
+                fileCounter.DownloadedSize = fileCounter.Size;
 
                 Utils.Logger.LogInformation(string.Format("Downloading {0:0.0}% - {1} 100%",
-                    100 * ((double)totalDownloadedSize / TotalDownloadSize),
+                    100 * ((double)DownloadPlanCounter.DownloadedSize / DownloadPlanCounter.Size),
                     filePlan.Filename));
+
+                if (downloadReportCallback != null)
+                    downloadReportCallback(DownloadPlanCounter, fileCounter);
 
                 continue;
             }
 
             Utils.Logger.LogInformation(string.Format("Downloading {0:0.0}% - {1} 0% | {2}/{3} chunks",
-                            100 * ((double)totalDownloadedSize / TotalDownloadSize),
+                            100 * ((double)DownloadPlanCounter.DownloadedSize / DownloadPlanCounter.Size),
                             filePlan.Filename,
                             0, chunkCount));
 
@@ -409,7 +447,10 @@ public class DownloadPlan
 
                 while (webWorkers.Count > 0)
                 {
-                    var completedTask = await Task.WhenAny(webWorkers);
+                    var completedTask = await Task.WhenAny(webWorkers).WaitAsync(cts.Token);
+
+                    cts.Token.ThrowIfCancellationRequested();
+
                     webWorkers.Remove(completedTask);
                     var downloadResult = await completedTask;
                     var webChunk = downloadResult.WebChunk;
@@ -429,15 +470,19 @@ public class DownloadPlan
                     using (downloadResult)
                     {
                         fs.Position = downloadResult.FileOffset;
-                        fs.Write(webChunk.DataChunk.Data, (int)downloadResult.ChunkOffset, (int)downloadResult.DataSize);
-                        downloadedSize += downloadResult.DataSize;
-                        totalDownloadedSize += downloadResult.DataSize;
+                        await fs.WriteAsync(webChunk.DataChunk.Data, (int)downloadResult.ChunkOffset, (int)downloadResult.DataSize);
+
+                        fileCounter.DownloadedSize += downloadResult.DataSize;
+                        DownloadPlanCounter.DownloadedSize += downloadResult.DataSize;
 
                         Utils.Logger.LogInformation(string.Format("Downloading {0:0.0}% - {1} {2:0.0}% | {3}/{4} chunks",
-                            100 * ((double)totalDownloadedSize / TotalDownloadSize),
+                            100 * ((double)DownloadPlanCounter.DownloadedSize / DownloadPlanCounter.Size),
                             filePlan.Filename,
-                            100 * ((float)downloadedSize / filePlan.FileSize),
+                            100 * ((float)fileCounter.DownloadedSize / fileCounter.Size),
                             ++downloadedChunkCount, chunkCount));
+
+                        if (downloadReportCallback != null)
+                            downloadReportCallback(DownloadPlanCounter, fileCounter);
                     }
 
                     --webChunk.RefCount;

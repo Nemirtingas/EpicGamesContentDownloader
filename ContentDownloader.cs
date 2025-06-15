@@ -1,6 +1,8 @@
-﻿using EpicKit.WebAPI.Store.Models;
+﻿using EpicKit.Manifest;
+using EpicKit.WebAPI.Store.Models;
+using Microsoft.Extensions.Logging;
 
-namespace EpicContentContentDownloader;
+namespace EpicGamesContentDownloader;
 
 public static class ContentDownloader
 {
@@ -26,7 +28,10 @@ public static class ContentDownloader
         );
 
         if (settings == null)
+        {
+            Utils.Logger.LogWarning("Failed to login with cached login tokens.");
             return false;
+        }
 
         SaveAccountSettings(settings);
         return true;
@@ -37,7 +42,10 @@ public static class ContentDownloader
         var settings = await EpicGamesSession.LoginWithAuthorizationCodeAsync(authorizationCode);
 
         if (settings == null)
+        {
+            Utils.Logger.LogError("Failed to login with authorization code.");
             return false;
+        }
 
         SaveAccountSettings(settings);
         return true;
@@ -67,5 +75,10 @@ public static class ContentDownloader
     public static async Task<EpicKit.ManifestDownloadInfos> GetManifestDownloadInfosAsync(string gameNamespace, string catalogItemId, string appName, string platform, string label)
     {
         return await EpicGamesSession.GetManifestDownloadInfosAsync(gameNamespace, catalogItemId, appName, platform, label);
+    }
+
+    public static async Task<DownloadPlan> BuildDownloadPlanAsync(Manifest manifest, DownloadConfiguration downloadConfiguration)
+    {
+        return await DownloadPlan.BuildDownloadPlanAsync(downloadConfiguration, manifest);
     }
 }
