@@ -1,0 +1,3 @@
+[submodule "EpicKit"]
+	path = EpicKit
+	url = https://github.com/Nemirtingas/EpicKit.git
