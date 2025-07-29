@@ -5,8 +5,6 @@ VisualStudioVersion = 17.13.35818.85
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EpicGamesContentDownloader", "EpicGamesContentDownloader.csproj", "{80234FA8-B8EF-C4E9-9204-9DFCFB79D5CA}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EpicKit", "EpicKit\EpicKit.csproj", "{6190611E-C420-70DD-D7AF-2087E04137AF}"
-EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -17,10 +15,6 @@ Global
 		{80234FA8-B8EF-C4E9-9204-9DFCFB79D5CA}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{80234FA8-B8EF-C4E9-9204-9DFCFB79D5CA}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{80234FA8-B8EF-C4E9-9204-9DFCFB79D5CA}.Release|Any CPU.Build.0 = Release|Any CPU
-		{6190611E-C420-70DD-D7AF-2087E04137AF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{6190611E-C420-70DD-D7AF-2087E04137AF}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{6190611E-C420-70DD-D7AF-2087E04137AF}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{6190611E-C420-70DD-D7AF-2087E04137AF}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

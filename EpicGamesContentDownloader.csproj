@@ -14,12 +14,9 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="EpicKit" Version="0.4.2" />
     <PackageReference Include="log4net" Version="3.1.0" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.5" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <ProjectReference Include="EpicKit\EpicKit.csproj" />
   </ItemGroup>
 
 </Project>

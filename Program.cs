@@ -1,4 +1,4 @@
-﻿using EpicKit.Manifest;
+using EpicKit.Manifest;
 using log4net.Layout;
 using Microsoft.Extensions.Logging;
 
