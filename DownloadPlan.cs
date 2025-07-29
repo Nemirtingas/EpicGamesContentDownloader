@@ -99,7 +99,6 @@ public class DownloadPlan
                 }
 
                 Utils.Logger.LogTrace($"Already processing chunk: {webChunk.ChunkFilePath}");
-                Monitor.Wait(webChunk);
                 if (webChunk.DataChunk != null)
                 {
                     Utils.Logger.LogTrace($"Already processed chunk: {webChunk.ChunkFilePath}");
