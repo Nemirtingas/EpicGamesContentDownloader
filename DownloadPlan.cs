@@ -297,44 +297,48 @@ public class DownloadPlan
             await Task.Run(() =>
             {
                 long fileOffset = 0;
+
+                var chunks = new Dictionary<EpicKit.Manifest.Guid, ChunkMetadata>();
+
+                foreach (var data_chunk in manifest.ChunkDataList.ChunkData)
+                {
+                    chunks[data_chunk.Guid] = data_chunk;
+                }
+
                 foreach (var file_chunk in fileManifest.FileChunks)
                 {
-                    foreach (var data_chunk in manifest.ChunkDataList.ChunkData)
+                    if (!chunks.TryGetValue(file_chunk.Guid, out var data_chunk))
+                        return;
+
+                    FileDownloadChunk fdc = new FileDownloadChunk
                     {
-                        if (file_chunk.Guid.Equals(data_chunk.Guid))
-                        {
-                            FileDownloadChunk fdc = new FileDownloadChunk
-                            {
-                                FileOffset = fileOffset,
-                                ChunkOffset = file_chunk.Offset,
-                                DataSize = file_chunk.Size,
-                                Guid = data_chunk.Guid,
-                            };
+                        FileOffset = fileOffset,
+                        ChunkOffset = file_chunk.Offset,
+                        DataSize = file_chunk.Size,
+                        Guid = data_chunk.Guid,
+                    };
 
-                            fileOffset += file_chunk.Size;
+                    fileOffset += file_chunk.Size;
 
-                            if (commonWebChunks.ContainsKey(data_chunk.Guid))
-                            {
-                                fdc.WebChunk = commonWebChunks[data_chunk.Guid];
-                                ++fdc.WebChunk.RefCount;
-                            }
-                            else
-                            {
-                                fdc.WebChunk = new FileWebChunk
-                                {
-                                    WebPath = data_chunk.Path(),
-                                    RefCount = 1,
-                                };
-
-                                fdc.WebChunk.ChunkFilePath = Path.Combine(plan.OutputDirectory, ".egstore", "pbs", fdc.WebChunk.WebPath);
-
-                                commonWebChunks[data_chunk.Guid] = fdc.WebChunk;
-                            }
-
-                            fileDownloadPlan.FileChunks.Add(fdc);
-                            break;
-                        }
+                    if (commonWebChunks.ContainsKey(data_chunk.Guid))
+                    {
+                        fdc.WebChunk = commonWebChunks[data_chunk.Guid];
+                        ++fdc.WebChunk.RefCount;
                     }
+                    else
+                    {
+                        fdc.WebChunk = new FileWebChunk
+                        {
+                            WebPath = data_chunk.Path(),
+                            RefCount = 1,
+                        };
+
+                        fdc.WebChunk.ChunkFilePath = Path.Combine(plan.OutputDirectory, ".egstore", "pbs", fdc.WebChunk.WebPath);
+
+                        commonWebChunks[data_chunk.Guid] = fdc.WebChunk;
+                    }
+
+                    fileDownloadPlan.FileChunks.Add(fdc);
                 }
             });
 
@@ -365,7 +369,8 @@ public class DownloadPlan
             var sha1 = SHA1.Create();
             using (var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read))
             {
-                if (shaHash.SequenceEqual(await sha1.ComputeHashAsync(fs)))
+                var sha1Checksum = await sha1.ComputeHashAsync(fs);
+                if (shaHash.SequenceEqual(sha1Checksum))
                 {
                     var chunksToDelete = new List<string>();
 
